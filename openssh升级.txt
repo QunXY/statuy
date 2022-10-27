@@ -1,0 +1,959 @@
+#ssh new env
+export PATH=/usr/local/bin:/usr/local/sbin:$PATH
+
+
+
+
+
+升级zlib
+tar -zxvf zlib-1.2.11.tar.gz
+# cd zlib-1.2.11
+# ./configure --prefix=/usr
+# make
+# 注意：此处需要卸载当前zlib（必须按顺序操作，lib64下涉及的模块丢失）
+# rpm -e --nodeps zlib
+# make install
+ 
+# 共享库文件注册到系统
+# echo '/usr/lib' >> /etc/ld.so.conf
+# 更新共享库cache
+# ldconfig                  
+7.升级openssl
+
+# 备份当前的openssl
+# mv  /usr/lib64/openssl /usr/lib64/openssl.old
+# mv  /usr/bin/openssl  /usr/bin/openssl.old
+# mv  /etc/pki/ca-trust/extracted/openssl  /etc/pki/ca-trust/extracted/openssl.old
+ 
+#如下两个库文件必须先备份，因系统内部分工具（如yum、wget等）依赖此库，而新版OpenSSL不包含这两个库
+# cp  /usr/lib64/libcrypto.so.10  /usr/lib64/libcrypto.so.10.old
+# cp  /usr/lib64/libssl.so.10  /usr/lib64/libssl.so.10.old
+ 
+# 卸载但钱openssl
+# rpm -qa |grep openssl|xargs -i rpm -e --nodeps {}
+ 
+# 安装openssl
+# tar -zxvf openssl-1.0.2p.tar.gz
+# cd openssl-1.0.2p
+# 必须加上--shared，否则编译时会因找不到新安装的openssl的类库而报错
+# ./config --prefix=/usr/local/ssl --openssldir=/etc/ssl --shared zlib 
+# make
+# make test                          
+# make install
+
+# 验证
+# openssl version -a    
+tar -xf  openssl-fips-2.0.16.tar.gz
+cd openssl-fips-2.0.16
+./config --prefix=/usr/local/ssl
+make
+make install
+#ssl new env
+export PATH=/usr/local/ssl/bin:/usr/local/ssl/sbin:$PATH
+# 恢复共享库
+# mv  /usr/lib64/libcrypto.so.10.old  /usr/lib64/libcrypto.so.10
+# mv  /usr/lib64/libssl.so.10.old  /usr/lib64/libssl.so.10             
+8.升级openssh
+
+# 备份当前openssh
+# mv /etc/ssh /etc/ssh.old
+ 
+# 卸载当前openssh
+# 查看已安装的openssh
+# rpm -qa | grep openssh
+ 
+# 删除
+# rpm -qa |grep openssh|xargs -i rpm -e --nodeps {}
+ 
+# openssh安装前环境配置 （要保证这里的命令都能执行正确）
+# install  -v -m700 -d /var/lib/sshd
+# chown  -v root:sys /var/lib/sshd
+# groupadd -g 51 sshd
+# useradd  -c 'sshd PrivSep' -d /var/lib/sshd -g sshd -s /bin/false -u 51 sshd
+ 
+# openssh_7.4p1源码安装
+# tar -zxvf openssh-7.4p1.tar.gz
+# cd openssh-7.4p1
+默认安装注意环境变量的渲染
+#ssh new env
+export PATH=/usr/local/bin:/usr/local/sbin:$PATH
+# 关联的检查配置项要特别注意
+# ./configure --prefix=/usr  --sysconfdir=/etc/ssh  --with-md5-passwords  --with-pam  --with-zlib --with-ssl-dir=/usr/local/ssl --with-privsep-path=/var/lib/sshd
+# make
+# make install
+ 
+# openssh安装后环境配置
+# install -v -m755    contrib/ssh-copy-id /usr/bin
+# install -v -m644    contrib/ssh-copy-id.1 /usr/share/man/man1
+# install -v -m755 -d /usr/share/doc/openssh-7.4p1
+# install -v -m644    INSTALL LICENCE OVERVIEW README* /usr/share/doc/openssh-7.4p1
+ 
+#验证是否升级成功
+# ssh -V  
+ 
+# 启动openssh服务
+# echo 'X11Forwarding yes' >> /etc/ssh/sshd_config
+# 配置允许root用户通过ssh登录
+# echo "PermitRootLogin yes" >> /etc/ssh/sshd_config 
+# cp -p contrib/redhat/sshd.init /etc/init.d/sshd
+# chmod +x /etc/init.d/sshd
+# chkconfig  --add  sshd
+# chkconfig  sshd  on
+# chkconfig  --list  sshd
+#注意：ssh连接会因重启openssh断开
+# service sshd restart
+# 此时需要通过telnet登入再执行sshd服务重启命令
+# telnet x.x.x.x
+# service sshd restart
+ 
+# 整理操作前备份
+# mv /etc/securetty.old /etc/securetty
+# chkconfig  xinetd off
+# service xinetd stop
+#如有必要，可重新开启防火墙
+# service iptables start
+# chkconfig iptables on
+ 
+# 如需要还原操作前的ssh配置信息，可直接删除升级后的配置信息（不想修复的，请忽略）
+# rm -rf /etc/ssh
+# mv /etc/ssh.old /etc/ssh
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+升级操作系统OpenSSH及其OpenSSL的正确姿势
+独指蜗牛4人评论19040人阅读2018-07-08 23:28:14
+需求说明
+在本小节中，让我花点篇幅绕个弯子解释下文章标题是什么意思，以及这篇文章到底讲的是什么，这将有助于理解本文的内容。
+
+ 
+
+有时，可能由于审计需要或修复漏洞的需要，我们可能会遇到这么一个需求：升级操作系统的openssl。
+
+ 
+
+那，怎么升级操作系统的openssl呢？那很简单，一条命令搞定：
+
+[root@gw ~]# yum update openssl -y
+
+没错，这的确可以升级操作系统的openssl。这只是小版本的升级，比如将openssl从1.0.1e-43版本升级到1.0.1e-57版本，也可以修补一些漏洞。但是，在审计时，审计人员会告诉你，这不行，他要的是跨版本的升级。比如，将操作系统的openssl从1.0.1e版本升级到1.0.2h版本，啥，新出了个1.1.0h版本，那就升级到最新的1.1.0h版本吧。他就认为版本越高越好，漏洞越少，他也不管你到底有没有进行跨版本升级的必要性，到底是不是真的技术上可行。而他怎么看openssl版本的呢？可能就是登录到系统中，执行下面的命令：
+
+[root@gw ~]# ssh -V
+
+ 
+
+就因为ssh -V命令执行后显示出来的openssl版本较低，就说要(跨版本)升级操作系统的openssl。这里面存在逻辑问题，让我逐个地解释。
+
+ 
+
+首先，我给个结论：跨版本升级操作系统的openssl是不可能的。
+
+你可以在系统中尝试执行下yum remove openssl命令，你就可以看到，非常非常多的软件是依赖于openssl软件。openssl是一个非常基础的软件。假设你升级了操作系统的openssl，比如说，编译安装一个新版本的openssl覆盖掉操作系统自带的openssl。这就会导致那些依赖于openssl的软件的openssl相关的功能变得不可用，比如说，某软件原本是支持https的，现在可能就不支持了。除非你能将系统中所有依赖于openssl的软件基于新版本的openssl全都编译一遍，而这通常是不可能的。
+
+ 
+
+其次，我们并不需要升级操作系统的openssl。
+
+我想，很多人在碰到这个需求时，可能都有去百度过，然后百度出了一大堆文章，然后了解到也需要重新编译安装openssh。但是，几乎我看到的所有文章，都采用的是错误的做法，所以才有了我这篇文章。他们的做法虽然各不相同，但大概也可以概括为：先强制卸载操作系统的openssl、openssh，再编译安装一个新版本的openssl(和其它可能的附带软件)，然后各种莫名其妙的操作，最后编译安装一个新版本的openssh。这种做法无法达到目的吗？那倒也不是。但可能代价就是，所有其它依赖于操作系统的openssl的软件的openssl相关的功能都不能用了。
+
+ 
+
+因此来说，正确的做法是什么？这就是本文所要介绍的。
+
+ssh命令是openssh软件的一部分。我们无法升级操作系统的openssl，但是我们可以另外编译一个openssl，放到单独的应用目录中，与操作系统的openssl互不干涉。再基于新编译出来的openssl，将新的openssh软件编译出来。 而操作系统的openssh是可以被替换的。如果你尝试执行 yum remove openssh* 命令就可以看到，没有其它软件依赖于openssh。此外，openssh软件提供了sshd服务。所以，我们只要还要配置并搭建好sshd服务，就可以替代操作系统自带的openssh了。
+
+ 
+
+简单来说，这篇文章讲的就是，如何升级openssh及其所依赖的openssl。
+
+ 
+
+OpenSSH升级思路
+要升级openssh，我们需要先搞懂openssl是怎么安装的。
+
+ 
+
+我使用的操作系统是centos 6的，我以安装openssh 7.5.p1为例。
+
+从openssh官网下载openssh 7.5.p1源码包，查看里面的INSTALL文件，里面有对它的依赖关系做说明。
+
+ 
+
+openssh 7.5.p1对下列软件的依赖是必选的：
+
+openssh依赖的软件(必选)
+
+备注
+
+Zlib
+
+要求1.1.4或1.2.1.2或更新的版本(1.2.x早期的版本有问题)。
+
+libcrypto
+
+(LibreSSL或OpenSSL)
+
+OpenSSH依赖于libcrypto，而libcrypto可以由LibreSSL或OpenSSL提供。如果是使用的OpenSSL，要求OpenSSL的版本要大于等于0.9.8f并小于1.1.0。由于API不同，现在还不支持OpenSSL 1.1.x版本。
+
+LibreSSL/OpenSSL应该编译成位置无关的库(position-independent library)，比如使用-fPIC选项，否则OpenSSH会无法链接它；如果你必须使用一个非位置无关(non-position-independent)的libcrypto，那么你在编译OpenSSH时必须加上--without-pie选项。
+
+ 
+
+openssh 7.5.p1对下列软件的依赖是可选的：
+
+openssh依赖的软件(可选)
+
+备注
+
+PAM
+
+如果操作系统支持PAM(Pluggable Authentication Modules)，那么OpenSSH就可以被编译成支持PAM功能的。大多数的Linux发行版，自然也包括RedHat/CentOS系统，都是支持PAM的。所以，如果我们要编译出一个可以替换操作系统自带OpenSSH的完整功能的OpenSSH，自然也是要支持PAM的。
+
+其它软件：
+
+NB
+
+PRNGD
+
+EGD
+
+GNOME
+
+S/Key
+
+LibEdit
+
+LDNS
+
+Autoconf
+
+Basic Security Module (BSM)
+
+这些就不展开来说了。
+
+ 
+
+基本上来说，要编译出一个功能类似于操作系统自带的OpenSSH软件，我们至少需要先准备好Zlib、OpenSSL(或LibreSSL)和PAM软件。下面，我们就逐个逐个地来进行安装。
+
+ 
+
+安装Zlib
+Zlib用于提供压缩和解压缩功能。操作系统已经自带了zlib，版本也符合要求。实际上，openssl和openssh都依赖于zlib。执行下面的命令，安装zlib开发包：
+
+[root@gw ~]# yum install zlib-devel -y
+
+ 
+
+安装PAM
+PAM(Pluggable Authentication Modules，可插拔认证模块)用于提供安全控制。操作系统也已经自带了PAM，版本也是可以的。执行下面的命令，安装PAM开发包：
+
+[root@gw ~]# yum install pam-devel -y
+
+ 
+
+安装tcp_wrappers
+tcp_wrappers是一种安全工具，通常，我们在/etc/hosts.allow或/etc/hosts.deny文件中配置的过滤规则就是使用的tcp_wrappers的功能了。openssh在编译时的确是可以选择支持tcp_wrappers的，但我不知道为什么它的安装要求里面没有体现。操作系统自带的tcp_wrappers的版本是可以的。执行下面的命令，安装tcp_wrappers开发包：
+
+[root@gw ~]# yum install tcp_wrappers-devel -y
+
+ 
+
+安装OpenSSL
+由于OpenSSH 7.5.p1要求OpenSSL的版本大于等于0.9.8f并小于1.1.0，因此，当前(2017年6月)符合要求的最新OpenSSL版本为1.0.2l。
+
+ 
+
+首先，从openssl官网下载源码包openssl-fips-2.0.16.tar.gz，将其安装到/opt/fips-2.0.16目录下。
+
+ 
+
+编译安装FIPS模块：
+
+[root@gw OpenSSL]# export FIPSDIR=/opt/fips-2.0.16
+
+[root@gw OpenSSL]# tar -xvf openssl-fips-2.0.16.tar.gz
+
+[root@gw OpenSSL]# cd openssl-fips-2.0.16
+
+[root@gw openssl-fips-2.0.16]# ./config
+
+[root@gw openssl-fips-2.0.16]# make
+
+[root@gw openssl-fips-2.0.16]# make install
+
+说明：
+
+在编译前先设定环境变量FIPSDIR，这是用于指定FIPS模块的安装目录，这是fips软件特有的安装特性。软件编译时会检测该环境变量是否存在。若不指定，默认会安装在/usr/local/ssl/fips-2.0目录。
+
+ 
+
+从openssl官网下载源码包openssl-1.0.2l.tar.gz，将其安装到/opt/openssl1.0.2l_20170617目录下。将openssl安装到专门的目录，这是为了避免对操作系统自带的openssl造成影响。
+
+ 
+
+编译安装OpenSSL：
+
+[root@gw OpenSSL]# tar -xvf openssl-1.0.2l.tar.gz
+
+[root@gw OpenSSL]# cd openssl-1.0.2l
+
+[root@gw openssl-1.0.2l]# ./config --prefix=/opt/openssl1.0.2l_20170617 --openssldir=/opt/openssl1.0.2l_20170617/openssl fips --with-fipsdir=/opt/fips-2.0.16 zlib-dynamic shared -fPIC
+
+[root@gw openssl-1.0.2l]# make depend
+
+[root@gw openssl-1.0.2l]# make
+
+[root@gw openssl-1.0.2l]# make test
+
+[root@gw openssl-1.0.2l]# make install
+
+下面是编译时使用到的选项：
+
+--prefix：指定openssl的安装目录。按本例中的安装方式，安装完成后该目录下会包含bin(含二进制程序)、lib(含动态库文件)、include/openssl(含报头文件)及openssl(--openssldir选项指定的)这些子目录。
+
+--openssldir：指定openssl文件的安装目录。按本例中的安装方式，安装完成后该目录下会包括certs(存放证书文件)、man(存放man文件)、misc(存放各种脚本)、private(存放私钥文件)这些子目录及openssl.cnf配置文件。
+
+fips：集成FIPS模块。
+
+--with-fipsdir：指向FIPS模块的安装目录位置。
+
+zlib-dynamic：编译支持zlib压缩/解压缩，让openssl加载zlib动态库。该选项只在支持加载动态库的操作系统上才支持。这是默认选项。
+
+shared：除了静态库以外，让openssl(在支持的平台上)也编译生成openssl动态库。
+
+-fPIC：将openssl动态库编译成位置无关(position-independent)的代码。
+
+ 
+
+安装完成后，将OpenSSL的库文件目录添加到/etc/ld.so.conf文件中，并加载到系统内存缓存中：
+
+[root@gw openssl-1.0.2l]# echo '/opt/openssl1.0.2l_20170617/lib' >> /etc/ld.so.conf
+
+[root@gw openssl-1.0.2l]# ldconfig
+
+ 
+
+安装OpenSSH
+从openssl官网下载源码包openssh-7.5p1.tar.gz，将其安装到/opt/openssh7.5.p1_20170617目录下。将openssh安装到专门的目录，这是为了避免与操作系统自带的openssh造成不必要的冲突，增加复杂度。
+
+ 
+
+编译安装OpenSSH：
+
+[root@gw OpenSSH]# tar -xvf openssh-7.5p1.tar.gz
+
+[root@gw OpenSSH]# cd openssh-7.5p1
+
+[root@gw openssh-7.5p1]# ./configure --prefix=/opt/openssh7.5.p1_20170617 --with-ssl-dir=/opt/openssl1.0.2l_20170617 --with-pam --with-tcp-wrappers
+
+[root@gw openssh-7.5p1]# make
+
+[root@gw openssh-7.5p1]# make install
+
+下面是编译时使用到的选项：
+
+--prefix：指定安装目录
+
+--with-ssl-dir=DIR：指向LibreSSL/OpenSSL库的安装目录的所在路径。
+
+--with-pam：启用PAM支持。根据OpenSSH的安装说明，如果在编译时启用了PAM，那么在安装完成后，也必须在sshd服务的配置文件sshd_config中启用它(使用UsePAM指令)。
+
+ 
+
+根据OpenSSH的安装说明，如果有启用PAM，那么就需要手工安装一个给sshd程序使用的PAM配置文件，否则安装好OpenSSH后你可能会无法使用密码登录系统。在编译时，我使用 --with-pam 选项启用了对PAM的支持，但是，编译OpenSSH时并没有编译选项让你指定PAM配置文件的位置，那么我们要怎么提供这个配置文件呢？
+
+事实上，OpenSSH有另外一个编译选项--with-pam-service=name可以指定PAM服务名，它的默认值是sshd。而操作系统自带的PAM软件默认将所有PAM配置文件都放置在/etc/pam.d目录下。结合这两个信息，就可确定OpenSSH的PAM配置文件应为/etc/pam.d/sshd文件。而这个文件原来就有了，所以我们不用额外手工创建一个。
+
+ 
+
+设置PATH路径：
+
+[root@gw ~]# echo 'export PATH=/opt/openssh7.5.p1_20170617/bin:/opt/openssh7.5.p1_20170617/sbin:$PATH' >> /etc/profile.d/path.sh
+
+[root@gw ~]# . /etc/profile.d/path.sh
+
+ 
+
+此时，使用ssh -V命令就可以看到新版本号了：
+
+[root@gw ~]# ssh -V
+
+OpenSSH_7.5p1, OpenSSL 1.0.2l-fips  25 May 2017
+
+ 
+
+配置OpenSSH
+前面已经安装好了openssh，但是我们还需要配置它，以保证sshd服务可以启起来。
+
+ 
+
+我们可以先看一下原有的sshd服务(属于openssh-server软件包)都有哪些配置文件：
+
+[root@gw ~]# rpm -ql openssh-server | grep -i --color etc
+
+/etc/pam.d/ssh-keycat
+
+/etc/pam.d/sshd
+
+/etc/rc.d/init.d/sshd
+
+/etc/ssh/sshd_config
+
+/etc/sysconfig/sshd
+
+可以看到，sshd服务的配置文件为/etc/ssh/sshd_config，它的pam配置文件为/etc/pam.d/sshd和/etc/pam.d/ssh-keycat，启动脚本文件为/etc/rc.d/init.d/sshd，启动脚本里面有引用到文件/etc/sysconfig/sshd。
+
+ 
+
+参照系统原有的配置文件修改我们软件的sshd_config配置文件，这是sshd服务的配置文件(红色字体的为新增或修改的部分)：
+
+[root@gw ~]# vim /opt/openssh7.5.p1_20170617/etc/sshd_config
+
+Protocol 2
+
+SyslogFacility AUTHPRIV
+
+PermitRootLogin yes
+
+AuthorizedKeysFile      .ssh/authorized_keys
+
+PasswordAuthentication yes
+
+ChallengeResponseAuthentication no
+
+#GSSAPIAuthentication yes                                                    //该选项目前还不支持
+
+#GSSAPICleanupCredentials yes                                            //该选项目前还不支持
+
+UsePAM yes
+
+ 
+
+AcceptEnv LANG LC_CTYPE LC_NUMERIC LC_TIME LC_COLLATE LC_MONETARY LC_MESSAGES
+
+AcceptEnv LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT
+
+AcceptEnv LC_IDENTIFICATION LC_ALL LANGUAGE
+
+AcceptEnv XMODIFIERS
+
+ 
+
+X11Forwarding yes
+
+Subsystem       sftp    /opt/openssh7.5.p1_20170617/libexec/sftp-server
+
+注意，UsePAM一定要启用，OpenSSH的安装说明里有提到，如果编译时启用了PAM支持，那么就必须在sshd_config文件中启用它。
+
+ 
+
+拷贝系统原有的配置文件/etc/sysconfig/sshd到我们软件下面，这个配置文件用于设置启动sshd服务所需的环境变量，在sshd服务的启动脚本里有调用到该配置文件：
+
+[root@gw ~]# cp -a /etc/sysconfig/sshd /opt/openssh7.5.p1_20170617/etc/sshd
+
+ 
+
+接下来要修改sshd服务的启动脚本/etc/rc.d/init.d/sshd。先将启动脚本备份一份为sshd.old，并添加至chkconfig管理：
+
+[root@gw ~]# cp /etc/rc.d/init.d/sshd /etc/rc.d/init.d/sshd.old
+
+[root@gw ~]# chkconfig --add sshd.old
+
+再根据我们的OpenSSH的安装路径，来修改原有的启动脚本(红色字体为有新增或修改的部分)：
+
+[root@gw ~]# vim /etc/rc.d/init.d/sshd
+
+### BEGIN INIT INFO
+
+# Provides: sshd
+
+# Required-Start: $local_fs $network $syslog
+
+# Required-Stop: $local_fs $syslog
+
+# Should-Start: $syslog
+
+# Should-Stop: $network $syslog
+
+# Default-Start: 2 3 4 5
+
+# Default-Stop: 0 1 6
+
+# Short-Description: Start up the OpenSSH server daemon
+
+# Description:       SSH is a protocol for secure remote shell access.
+
+#                    This service starts up the OpenSSH server daemon.
+
+### END INIT INFO
+
+ 
+
+. /etc/rc.d/init.d/functions
+
+ 
+
+[ -f /opt/openssh7.5.p1_20170617/etc/sshd ] && . /opt/openssh7.5.p1_20170617/etc/sshd
+
+ 
+
+RETVAL=0
+
+prog="sshd"
+
+lockfile=/var/lock/subsys/$prog
+
+ 
+
+KEYGEN=/opt/openssh7.5.p1_20170617/bin/ssh-keygen
+
+SSHD=/opt/openssh7.5.p1_20170617/sbin/sshd
+
+RSA1_KEY=/etc/ssh/ssh_host_key
+
+RSA_KEY=/opt/openssh7.5.p1_20170617/etc/ssh_host_rsa_key
+
+DSA_KEY=/opt/openssh7.5.p1_20170617/etc/ssh_host_dsa_key
+
+PID_FILE=/var/run/sshd.pid                                   # PID文件的所在路径，这个变量的值不要改
+
+ 
+
+runlevel=$(set -- $(runlevel); eval "echo \$$#" )
+
+ 
+
+fips_enabled() {
+
+       if [ -r /proc/sys/crypto/fips_enabled ]; then
+
+               cat /proc/sys/crypto/fips_enabled
+
+       else
+
+               echo 0
+
+       fi
+
+}
+
+ 
+
+do_rsa1_keygen() {
+
+       if [ ! -s $RSA1_KEY -a `fips_enabled` -eq 0 ]; then
+
+               echo -n $"Generating SSH1 RSA host key: "
+
+               rm -f $RSA1_KEY
+
+               if test ! -f $RSA1_KEY && $KEYGEN -q -t rsa1 -f $RSA1_KEY -C '' -N '' >&/dev/null; then
+
+                       chmod 600 $RSA1_KEY
+
+                       chmod 644 $RSA1_KEY.pub
+
+                       if [ -x /sbin/restorecon ]; then
+
+                           /sbin/restorecon $RSA1_KEY.pub
+
+                       fi
+
+                       success $"RSA1 key generation"
+
+                       echo
+
+               else
+
+                       failure $"RSA1 key generation"
+
+                       echo
+
+                       exit 1
+
+               fi
+
+       fi
+
+}
+
+ 
+
+do_rsa_keygen() {
+
+       if [ ! -s $RSA_KEY ]; then
+
+               echo -n $"Generating SSH2 RSA host key: "
+
+               rm -f $RSA_KEY
+
+               if test ! -f $RSA_KEY && $KEYGEN -q -t rsa -f $RSA_KEY -C '' -N '' >&/dev/null; then
+
+                       chmod 600 $RSA_KEY
+
+                       chmod 644 $RSA_KEY.pub
+
+                       if [ -x /sbin/restorecon ]; then
+
+                           /sbin/restorecon $RSA_KEY.pub
+
+                       fi
+
+                       success $"RSA key generation"
+
+                       echo
+
+               else
+
+                       failure $"RSA key generation"
+
+                       echo
+
+                       exit 1
+
+               fi
+
+       fi
+
+}
+
+ 
+
+do_dsa_keygen() {
+
+       if [ ! -s $DSA_KEY -a `fips_enabled` -eq 0 ]; then
+
+               echo -n $"Generating SSH2 DSA host key: "
+
+               rm -f $DSA_KEY
+
+               if test ! -f $DSA_KEY && $KEYGEN -q -t dsa -f $DSA_KEY -C '' -N '' >&/dev/null; then
+
+                       chmod 600 $DSA_KEY
+
+                       chmod 644 $DSA_KEY.pub
+
+                       if [ -x /sbin/restorecon ]; then
+
+                           /sbin/restorecon $DSA_KEY.pub
+
+                       fi
+
+                       success $"DSA key generation"
+
+                       echo
+
+               else
+
+                       failure $"DSA key generation"
+
+                       echo
+
+                       exit 1
+
+               fi
+
+       fi
+
+}
+
+ 
+
+do_restart_sanity_check()
+
+{
+
+       $SSHD -t
+
+       RETVAL=$?
+
+       if [ $RETVAL -ne  0 ]; then
+
+               failure $"Configuration file or keys are invalid"
+
+               echo
+
+       fi
+
+}
+
+ 
+
+start()
+
+{
+
+       [ -x $SSHD ] || exit 5
+
+       [ -f /opt/openssh7.5.p1_20170617/etc/sshd_config ] || exit 6
+
+       # Create keys if necessary
+
+       if [ "x${AUTOCREATE_SERVER_KEYS}" != xNO ]; then
+
+               do_rsa_keygen
+
+               if [ "x${AUTOCREATE_SERVER_KEYS}" != xRSAONLY ]; then
+
+                       #do_rsa1_keygen                                              # 注释掉这条语句
+
+                       do_dsa_keygen
+
+               fi
+
+       fi
+
+ 
+
+       echo -n $"Starting $prog: "
+
+       $SSHD $OPTIONS && success || failure
+
+       RETVAL=$?
+
+       [ $RETVAL -eq 0 ] && touch $lockfile
+
+       echo
+
+       return $RETVAL
+
+}
+
+ 
+
+stop()
+
+{
+
+       echo -n $"Stopping $prog: "
+
+       killproc -p $PID_FILE $SSHD
+
+       RETVAL=$?
+
+       # if we are in halt or reboot runlevel kill all running sessions
+
+       # so the TCP connections are closed cleanly
+
+       if [ "x$runlevel" = x0 -o "x$runlevel" = x6 ] ; then
+
+           trap '' TERM
+
+           killall $prog 2>/dev/null
+
+           trap TERM
+
+       fi
+
+       [ $RETVAL -eq 0 ] && rm -f $lockfile
+
+       echo
+
+}
+
+ 
+
+reload()
+
+{
+
+       echo -n $"Reloading $prog: "
+
+       killproc -p $PID_FILE $SSHD -HUP
+
+       RETVAL=$?
+
+       echo
+
+}
+
+ 
+
+restart() {
+
+       stop
+
+       start
+
+}
+
+ 
+
+force_reload() {
+
+       restart
+
+}
+
+ 
+
+rh_status() {
+
+       status -p $PID_FILE openssh-daemon
+
+}
+
+ 
+
+rh_status_q() {
+
+       rh_status >/dev/null 2>&1
+
+}
+
+ 
+
+case "$1" in
+
+       start)
+
+               rh_status_q && exit 0
+
+               start
+
+               ;;
+
+       stop)
+
+               if ! rh_status_q; then
+
+                       rm -f $lockfile
+
+                       exit 0
+
+               fi
+
+               stop
+
+               ;;
+
+       restart)
+
+               restart
+
+               ;;
+
+       reload)
+
+               rh_status_q || exit 7
+
+               reload
+
+               ;;
+
+       force-reload)
+
+               force_reload
+
+               ;;
+
+       condrestart|try-restart)
+
+               rh_status_q || exit 0
+
+               if [ -f $lockfile ] ; then
+
+                       do_restart_sanity_check
+
+                       if [ $RETVAL -eq 0 ] ; then
+
+                               stop
+
+                               # avoid race
+
+                               sleep 3
+
+                               start
+
+                       else
+
+                               RETVAL=6
+
+                       fi
+
+               fi
+
+               ;;
+
+       status)
+
+               rh_status
+
+               RETVAL=$?
+
+               if [ $RETVAL -eq 3 -a -f $lockfile ] ; then
+
+                       RETVAL=2
+
+               fi
+
+               ;;
+
+       *)
+
+               echo $"Usage: $0 {start|stop|restart|reload|force-reload|condrestart|try-restart|status}"
+
+               RETVAL=2
+
+esac
+
+exit $RETVAL
+
+由于OpenSSH依赖的OpenSSL已不支持rsa1，所以我将启动脚本中生成rsa1秘钥的指令注释掉了。
+
+ 
+
+接下来，关键的一步来了，我们要关闭旧的sshd服务，启动新的sshd服务。这个操作如果失败了，不会导致现有的ssh远程连接断开。所以我们可以先关闭旧的sshd程序，再启动新的sshd程序：
+
+[root@gw ~]# service sshd.old stop
+
+[root@gw ~]# service sshd start
+
+ 
+
+如果新的sshd服务启动成功了，我们可以先简单测试下，比如，看看普通用户和root用户是否能正常通过ssh登录。如果没有没有问题，我们可以在测测其它的，比如scp、sftp是否正常等。当然，如果有条件的话，可以使用漏洞扫描工具扫一下，看看有没有什么我们没有注意到的地方。
+
+ 
+
+最后，就可以删除掉旧sshd服务的启动脚本了，以免冲突：
+
+[root@gw ~]# rm -f /etc/init.d/sshd.old
+
+ 
+
+总结
+现在，所有操作都完成了。总的来说，整个升级过程应该还是挺明了的，不会有太多把系统搞挂的风险，可重复操作性强，重复升级也没有问题，也不会影响系统中的其它软件。
+
+当然，也有可以继续完善的地方，可能有两个方面吧。
+
+一是，openssl和openssh的编译选项基本来说我也只是使用了必要的选项，由于不知道操作系统自带的openssl和openssh原本的编译选项是什么，所以我们编译出来的openssl和openssh软件在功能特性上只是尽可能地接近原有的，安全性和性能可能也是有差异的。
+
+二是，我复用了操作系统原有的sshd服务的配置文件和启动脚本，这可能无法充分利用新版本openssh的特性。openssl和openssh本来也是挺复杂的东西，一时半会可能也很难完全弄明白。
+
+但是，不管怎么说，这种升级方式，应该会比强制升级openssl和openssh的方式好很多。
+# （如有必要）最后可以重新配置主机间的ssh互信
